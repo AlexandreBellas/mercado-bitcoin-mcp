@@ -10,3 +10,10 @@ MCP_AUTH_TOKEN=
 # AUTH_FAILURE_LIMIT=10
 # AUTH_FAILURE_WINDOW_SECONDS=900
 # AUTH_LOCKOUT_SECONDS=1800
+
+# Optional request quotas. Defaults: 60/minute per bearer, 600/minute global,
+# 1 public Mercado Bitcoin call/second, 3 private calls/second.
+# RATE_LIMIT_PER_MINUTE=60
+# RATE_LIMIT_GLOBAL_PER_MINUTE=600
+# MB_PUBLIC_PER_SECOND=1
+# MB_PRIVATE_PER_SECOND=3

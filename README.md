@@ -9,6 +9,7 @@ Read-only [Model Context Protocol](https://modelcontextprotocol.io) server for t
 3. Every `/mcp` request must send `Authorization: Bearer <MCP_AUTH_TOKEN>`.
 4. A missing or wrong token gets `401` with a JSON-RPC error body.
 5. Repeated failures from the same client IP are locked out (`429`) by a SQLite Durable Object.
+6. Authenticated `/mcp` requests are limited to 60 per minute for that bearer token and 600 per minute for the whole Worker. The limit returns `429` with `Retry-After` and does not call Mercado Bitcoin. `GET /health` is not limited.
 
 ## Secrets
 
@@ -22,7 +23,7 @@ Set these as Worker secrets. Do not put the values in the repo, in `wrangler.jso
 
 The Worker refuses `/mcp` when `MCP_AUTH_TOKEN` is missing. The access token from Mercado Bitcoin is cached in isolate memory and is never logged or returned.
 
-Optional plain vars (already in `wrangler.jsonc`, not secrets): `AUTH_FAILURE_LIMIT` (10), `AUTH_FAILURE_WINDOW_SECONDS` (900), `AUTH_LOCKOUT_SECONDS` (1800).
+Optional plain vars (already in `wrangler.jsonc`, not secrets): `AUTH_FAILURE_LIMIT` (10), `AUTH_FAILURE_WINDOW_SECONDS` (900), `AUTH_LOCKOUT_SECONDS` (1800), `RATE_LIMIT_PER_MINUTE` (60), `RATE_LIMIT_GLOBAL_PER_MINUTE` (600), `MB_PUBLIC_PER_SECOND` (1), `MB_PRIVATE_PER_SECOND` (3).
 
 ```bash
 npx wrangler secret put MB_API_KEY

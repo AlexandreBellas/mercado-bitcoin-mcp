@@ -1,6 +1,7 @@
 import { MB_TOKEN_URL, SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import type { Config } from "./config.js";
 import { httpFetch } from "./http-fetch.js";
+import type { OutboundBudget } from "./request-gate.js";
 
 interface TokenState {
 	accessToken: string;
@@ -20,8 +21,14 @@ const SAFE_CODE = /^[A-Za-z0-9_.:-]{1,32}$/;
 export class AuthManager {
 	private token: TokenState | null = null;
 	private refreshPromise: Promise<string> | null = null;
+	private budget: OutboundBudget | null = null;
 
 	constructor(private config: Config) {}
+
+	/** Same object for every request in this isolate. It only talks to the quota Durable Object. */
+	useOutbound(budget: OutboundBudget): void {
+		this.budget = budget;
+	}
 
 	matches(config: Config): boolean {
 		return this.config.apiKey === config.apiKey && this.config.apiSecret === config.apiSecret;
@@ -62,6 +69,7 @@ export class AuthManager {
 			client_id: this.config.apiKey,
 			client_secret: this.config.apiSecret,
 		}).toString();
+		await this.budget?.acquire("token");
 		const res = await httpFetch(MB_TOKEN_URL, {
 			method: "POST",
 			headers: {
@@ -72,6 +80,7 @@ export class AuthManager {
 			body,
 			redirect: "manual",
 		});
+		await this.budget?.observe("token", res);
 
 		if (!res.ok) {
 			const text = await readErrorBody(res);
