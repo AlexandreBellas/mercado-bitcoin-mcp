@@ -113,9 +113,13 @@ describe("read-only tool registry", () => {
 		expect(posts).toEqual(["src/auth.ts"]);
 		const auth = readFileSync("src/auth.ts", "utf8");
 		expect(auth).toContain("httpFetch(MB_TOKEN_URL");
+		expect(auth).toContain('"Content-Type": "application/x-www-form-urlencoded"');
+		expect(auth).toContain("grant_type: \"client_credentials\"");
+		expect(auth).toContain("data.expiration");
+		expect(auth).not.toContain("expires_in");
 		const constants = readFileSync("src/constants.ts", "utf8");
 		expect(constants).toContain('export const MB_API_BASE = "https://api.mercadobitcoin.net/api/v4"');
-		expect(constants).toContain("MB_TOKEN_URL = `${MB_API_BASE}/oauth2/token`");
+		expect(constants).toContain('export const MB_TOKEN_URL = "https://api.mercadobitcoin.net/oauth2/token"');
 		expect(auth.match(/method:\s*["']POST["']/g)).toHaveLength(1);
 	});
 
@@ -150,9 +154,18 @@ describe("read-only tool registry", () => {
 						: init?.body instanceof URLSearchParams
 							? init.body.toString()
 							: null;
-				calls.push({ url, method: init?.method ?? "GET", authorization: headers.get("authorization"), body });
-				if (url === MB_TOKEN_URL) {
-					return Response.json({ access_token: ACCESS_TOKEN, expires_in: 3600, token_type: "bearer" });
+				calls.push({
+					url,
+					method: init?.method ?? "GET",
+					authorization: headers.get("authorization"),
+					body,
+					contentType: headers.get("content-type"),
+				});
+				if (url === "https://api.mercadobitcoin.net/oauth2/token") {
+					return Response.json({
+						access_token: ACCESS_TOKEN,
+						expiration: Math.floor(Date.now() / 1000) + 3600,
+					});
 				}
 				if (url === "https://api.mercadobitcoin.net/api/v4/accounts") {
 					return Response.json([{ id: "acc-1", name: "main" }]);
@@ -166,12 +179,16 @@ describe("read-only tool registry", () => {
 		};
 		expect(first.result?.isError).toBeUndefined();
 		expect(first.result?.content?.[0]?.text).toContain("acc-1");
+		expect(MB_TOKEN_URL).toBe("https://api.mercadobitcoin.net/oauth2/token");
 		expect(calls.map((call) => ({ url: call.url, method: call.method, authorization: call.authorization }))).toEqual([
-			{ url: MB_TOKEN_URL, method: "POST", authorization: null },
+			{ url: "https://api.mercadobitcoin.net/oauth2/token", method: "POST", authorization: null },
 			{ url: "https://api.mercadobitcoin.net/api/v4/accounts", method: "GET", authorization: `Bearer ${ACCESS_TOKEN}` },
 		]);
+		expect(calls[0]?.contentType).toBe("application/x-www-form-urlencoded");
 		expect(calls[0]?.body).toContain("grant_type=client_credentials");
-		expect(calls[0]?.body).toContain(encodeURIComponent(API_KEY));
+		expect(calls[0]?.body).toContain("scope=global");
+		expect(calls[0]?.body).toContain(`client_id=${encodeURIComponent(API_KEY)}`);
+		expect(calls[0]?.body).toContain(`client_secret=${encodeURIComponent(API_SECRET)}`);
 
 		const second = (await callMcp(jsonRpc("tools/call", 4, { name: "mb_list_accounts", arguments: {} }))) as {
 			result?: { content?: { text: string }[] };

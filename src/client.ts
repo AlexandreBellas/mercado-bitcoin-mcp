@@ -1,5 +1,6 @@
 import type { AuthManager } from "./auth.js";
 import type { Config } from "./config.js";
+import { MB_API_BASE, MB_API_ORIGIN } from "./constants.js";
 import { httpFetch } from "./http-fetch.js";
 import { assertSafePath } from "./paths.js";
 
@@ -80,7 +81,13 @@ export class MBClient {
 }
 
 function assertUnderBase(url: URL, base: URL): void {
-	if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) {
+	const allowed = new URL(MB_API_BASE);
+	if (
+		base.origin !== MB_API_ORIGIN ||
+		base.pathname !== allowed.pathname ||
+		url.origin !== MB_API_ORIGIN ||
+		!url.pathname.startsWith(`${allowed.pathname}/`)
+	) {
 		throw new Error("Refusing to request outside the Mercado Bitcoin API.");
 	}
 }

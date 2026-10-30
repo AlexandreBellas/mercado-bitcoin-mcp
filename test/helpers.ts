@@ -79,6 +79,7 @@ export type FetchCall = {
 	method: string;
 	authorization: string | null;
 	body: string | null;
+	contentType?: string | null;
 };
 
 /**
