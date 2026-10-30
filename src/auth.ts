@@ -71,24 +71,41 @@ export class AuthManager {
 			throw new Error("Mercado Bitcoin authentication failed.");
 		}
 
-		const data = (await res.json()) as { access_token?: unknown; expires_in?: unknown };
+		const data = (await res.json()) as Oauth2AuthorizeResponse;
 		if (typeof data.access_token !== "string" || data.access_token.length === 0) {
 			throw new Error("Mercado Bitcoin authentication failed.");
 		}
 
-		const expiresIn =
-			typeof data.expires_in === "number" && Number.isFinite(data.expires_in) && data.expires_in > 0
-				? data.expires_in
-				: 60;
+		const now = Date.now();
+		const expiresAt = expiresAtFromExpiration(data.expiration, now);
+		this.token = { accessToken: data.access_token, expiresAt };
 
-		this.token = {
-			accessToken: data.access_token,
-			expiresAt: Date.now() + expiresIn * 1000,
-		};
-
-		console.error(JSON.stringify({ message: "Mercado Bitcoin token refreshed", expiresIn }));
+		console.error(
+			JSON.stringify({
+				message: "Mercado Bitcoin token refreshed",
+				expiresIn: Math.max(0, Math.round((expiresAt - now) / 1000)),
+			}),
+		);
 		return this.token.accessToken;
 	}
+}
+
+/**
+ * Oauth2AuthorizeResponse.expiration from the Mercado Bitcoin v4 swagger.
+ * A value of 1e9 or more is a unix timestamp in seconds. A smaller positive
+ * number is a TTL in seconds. Anything else falls back to a 60s cache.
+ */
+export function expiresAtFromExpiration(expiration: unknown, now: number): number {
+	if (typeof expiration !== "number" || !Number.isFinite(expiration) || expiration <= 0) {
+		return now + 60_000;
+	}
+	if (expiration >= 1_000_000_000) return expiration * 1000;
+	return now + expiration * 1000;
+}
+
+interface Oauth2AuthorizeResponse {
+	access_token?: unknown;
+	expiration?: unknown;
 }
 
 let cached: AuthManager | null = null;
