@@ -11,8 +11,8 @@ export interface CredentialEnv {
 
 export function loadConfig(env: CredentialEnv, baseUrl: string): Config {
 	return {
-		apiKey: env.MB_API_KEY ?? "",
-		apiSecret: env.MB_API_SECRET ?? "",
+		apiKey: (env.MB_API_KEY ?? "").trim(),
+		apiSecret: (env.MB_API_SECRET ?? "").trim(),
 		baseUrl,
 	};
 }

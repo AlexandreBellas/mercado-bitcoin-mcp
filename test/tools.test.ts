@@ -116,7 +116,12 @@ describe("read-only tool registry", () => {
 		expect(auth).toContain('"Content-Type": "application/x-www-form-urlencoded"');
 		expect(auth).toContain("grant_type: \"client_credentials\"");
 		expect(auth).toContain("data.expiration");
-		expect(auth).not.toContain("expires_in");
+		expect(auth).toContain("expires_in");
+		expect(auth).toContain(".toString()");
+		expect(auth).toContain('Accept: "application/json"');
+		expect(auth).toContain('"User-Agent"');
+		expect(auth).toContain('redirect: "manual"');
+		expect(auth).not.toMatch(/cache:\s*["']no-store["']/);
 		const constants = readFileSync("src/constants.ts", "utf8");
 		expect(constants).toContain('export const MB_API_BASE = "https://api.mercadobitcoin.net/api/v4"');
 		expect(constants).toContain('export const MB_TOKEN_URL = "https://api.mercadobitcoin.net/oauth2/token"');
@@ -164,7 +169,9 @@ describe("read-only tool registry", () => {
 				if (url === "https://api.mercadobitcoin.net/oauth2/token") {
 					return Response.json({
 						access_token: ACCESS_TOKEN,
-						expiration: Math.floor(Date.now() / 1000) + 3600,
+						expires_in: 3599,
+						scope: "global",
+						token_type: "bearer",
 					});
 				}
 				if (url === "https://api.mercadobitcoin.net/api/v4/accounts") {
@@ -185,6 +192,7 @@ describe("read-only tool registry", () => {
 			{ url: "https://api.mercadobitcoin.net/api/v4/accounts", method: "GET", authorization: `Bearer ${ACCESS_TOKEN}` },
 		]);
 		expect(calls[0]?.contentType).toBe("application/x-www-form-urlencoded");
+		expect(typeof calls[0]?.body).toBe("string");
 		expect(calls[0]?.body).toContain("grant_type=client_credentials");
 		expect(calls[0]?.body).toContain("scope=global");
 		expect(calls[0]?.body).toContain(`client_id=${encodeURIComponent(API_KEY)}`);
