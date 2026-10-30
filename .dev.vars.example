@@ -1,0 +1,12 @@
+# Copy to .dev.vars for local `npm run dev`. Never commit .dev.vars.
+# Mercado Bitcoin read-only API key (client id) and secret.
+MB_API_KEY=
+MB_API_SECRET=
+# Bearer token required on every POST /mcp request.
+MCP_AUTH_TOKEN=
+
+# Optional lockout overrides. Wrangler vars are the defaults:
+# 10 failures / 900 seconds, then an 1800 second lockout.
+# AUTH_FAILURE_LIMIT=10
+# AUTH_FAILURE_WINDOW_SECONDS=900
+# AUTH_LOCKOUT_SECONDS=1800
