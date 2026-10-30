@@ -3,6 +3,7 @@ import type { Config } from "./config.js";
 import { MB_API_BASE, MB_API_ORIGIN } from "./constants.js";
 import { httpFetch } from "./http-fetch.js";
 import { assertSafePath } from "./paths.js";
+import type { OutboundBudget } from "./request-gate.js";
 
 const QUERY_KEY = /^[A-Za-z0-9_]{1,64}$/;
 
@@ -14,6 +15,7 @@ export class MBClient {
 	constructor(
 		private config: Config,
 		private auth: AuthManager,
+		private budget?: OutboundBudget,
 	) {}
 
 	get hasCredentials(): boolean {
@@ -22,14 +24,18 @@ export class MBClient {
 
 	async publicGet<T = unknown>(path: string, params?: Record<string, string | undefined>): Promise<T> {
 		const url = this.buildUrl(path, params);
+		await this.budget?.acquire("public");
 		const res = await getOnly(url);
+		await this.budget?.observe("public", res);
 		return this.handleResponse<T>(res);
 	}
 
 	async authGet<T = unknown>(path: string, params?: Record<string, string | undefined>): Promise<T> {
 		const url = this.buildUrl(path, params);
 		const token = await this.auth.getToken();
+		await this.budget?.acquire("private");
 		const res = await getOnly(url, { headers: { Authorization: `Bearer ${token}` } });
+		await this.budget?.observe("private", res);
 		return this.handleResponse<T>(res);
 	}
 

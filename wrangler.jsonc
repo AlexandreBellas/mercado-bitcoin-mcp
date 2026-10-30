@@ -1,6 +1,6 @@
 /**
  * Read-only Mercado Bitcoin MCP server.
- * Free plan: Workers plus one SQLite Durable Object for auth-failure lockouts.
+ * Free plan: Workers plus two SQLite Durable Objects (auth lockout and request quotas).
  * No paid bindings (no Workers Rate Limiting, AI, Queues, or KV).
  *
  * MB_API_KEY, MB_API_SECRET, and MCP_AUTH_TOKEN are Worker secrets.
@@ -26,7 +26,11 @@
 	"vars": {
 		"AUTH_FAILURE_LIMIT": "10",
 		"AUTH_FAILURE_WINDOW_SECONDS": "900",
-		"AUTH_LOCKOUT_SECONDS": "1800"
+		"AUTH_LOCKOUT_SECONDS": "1800",
+		"RATE_LIMIT_PER_MINUTE": "60",
+		"RATE_LIMIT_GLOBAL_PER_MINUTE": "600",
+		"MB_PUBLIC_PER_SECOND": "1",
+		"MB_PRIVATE_PER_SECOND": "3"
 	},
 	"secrets": {
 		"required": ["MB_API_KEY", "MB_API_SECRET", "MCP_AUTH_TOKEN"]
@@ -36,6 +40,10 @@
 			{
 				"name": "AUTH_RATE_LIMIT",
 				"class_name": "AuthRateLimit"
+			},
+			{
+				"name": "REQUEST_RATE_LIMIT",
+				"class_name": "RequestRateLimit"
 			}
 		]
 	},
@@ -43,6 +51,10 @@
 		{
 			"tag": "v1",
 			"new_sqlite_classes": ["AuthRateLimit"]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": ["RequestRateLimit"]
 		}
 	]
 }

@@ -8,6 +8,7 @@ import {
 } from "../src/rate-limit-policy.js";
 import type { AppEnv } from "../src/http.js";
 import type { AuthLimiter } from "../src/auth-gate.js";
+import { MemoryQuotaBook, type RequestQuota } from "../src/request-quota.js";
 
 export const MCP_TOKEN = "mcp-auth-token-test-value";
 export const API_KEY = "mb-api-key-test-value";
@@ -30,8 +31,21 @@ export class MemoryAuthLimiter implements AuthLimiter {
 	}
 }
 
+export function memoryRequestQuota(): RequestQuota {
+	const book = new MemoryQuotaBook();
+	return {
+		consume(requests) {
+			return book.consume(requests);
+		},
+		block(key, untilMs) {
+			book.block(key, untilMs);
+		},
+	};
+}
+
 export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 	const limiters = new Map<string, MemoryAuthLimiter>();
+	const quota = memoryRequestQuota();
 	return {
 		MB_API_KEY: API_KEY,
 		MB_API_SECRET: API_SECRET,
@@ -39,6 +53,10 @@ export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 		AUTH_FAILURE_LIMIT: "10",
 		AUTH_FAILURE_WINDOW_SECONDS: "900",
 		AUTH_LOCKOUT_SECONDS: "1800",
+		RATE_LIMIT_PER_MINUTE: "60",
+		RATE_LIMIT_GLOBAL_PER_MINUTE: "600",
+		MB_PUBLIC_PER_SECOND: "1",
+		MB_PRIVATE_PER_SECOND: "3",
 		AUTH_RATE_LIMIT: {
 			getByName(name: string) {
 				let limiter = limiters.get(name);
@@ -47,6 +65,11 @@ export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 					limiters.set(name, limiter);
 				}
 				return limiter;
+			},
+		},
+		REQUEST_RATE_LIMIT: {
+			getByName() {
+				return quota;
 			},
 		},
 		...overrides,

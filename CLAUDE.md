@@ -14,10 +14,11 @@ Read-only Mercado Bitcoin MCP server on Cloudflare Workers.
 
 ```text
 src/
-├── index.ts            Worker fetch handler. Exports AuthRateLimit
-├── http.ts             GET /health and POST /mcp
-├── auth-gate.ts        Bearer MCP_AUTH_TOKEN check and per-IP lockout
-├── auth-rate-limit.ts  SQLite Durable Object (new_sqlite_classes)
+├── index.ts              Worker fetch handler. Exports AuthRateLimit and RequestRateLimit
+├── http.ts               GET /health and POST /mcp
+├── auth-gate.ts          Bearer MCP_AUTH_TOKEN check and per-IP lockout
+├── auth-rate-limit.ts    SQLite Durable Object for auth-failure lockouts
+├── request-rate-limit.ts SQLite Durable Object for MCP and upstream quotas
 ├── mcp.ts              Stateless Streamable HTTP transport
 ├── server.ts           Registers every read tool
 ├── auth.ts             OAuth2 client_credentials token cache (isolate memory)

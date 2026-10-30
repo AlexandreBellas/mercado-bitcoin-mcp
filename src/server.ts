@@ -3,16 +3,19 @@ import { getAuthManager } from "./auth.js";
 import { MBClient } from "./client.js";
 import { MB_API_BASE, SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import { hasCredentials, loadConfig, type CredentialEnv } from "./config.js";
+import { outboundBudget, type QuotaEnv } from "./request-gate.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerPublicTools } from "./tools/public.js";
 import { READ_ONLY, ok } from "./tools/result.js";
 import { registerTradingTools } from "./tools/trading.js";
 import { registerWalletTools } from "./tools/wallet.js";
 
-export function createMbServer(env: CredentialEnv): McpServer {
+export function createMbServer(env: CredentialEnv & QuotaEnv): McpServer {
 	const config = loadConfig(env, MB_API_BASE);
 	const auth = getAuthManager(config);
-	const client = new MBClient(config, auth);
+	const budget = outboundBudget(env);
+	auth.useOutbound(budget);
+	const client = new MBClient(config, auth, budget);
 	const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
 	server.registerTool(
