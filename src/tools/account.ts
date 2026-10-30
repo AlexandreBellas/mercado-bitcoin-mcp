@@ -1,156 +1,101 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { MBClient } from "../client.js";
-import { Config } from "../config.js";
-import { SpendingTracker, requireAuth, requireMode, confirmationPreview } from "../guards.js";
+import type { MBClient } from "../client.js";
+import type { Config } from "../config.js";
+import { apiPath } from "../paths.js";
+import { read, READ_ONLY, requireCredentials } from "./result.js";
 
-function err(text: string) {
-  return { content: [{ type: "text" as const, text }], isError: true };
-}
+export function registerAccountTools(server: McpServer, client: MBClient, config: Config): void {
+	server.registerTool(
+		"mb_list_accounts",
+		{
+			description:
+				"List all your Mercado Bitcoin accounts (wallets). Returns account IDs needed for other reads.",
+			inputSchema: {},
+			annotations: READ_ONLY,
+		},
+		async () => {
+			const denied = requireCredentials(config);
+			if (denied) return denied;
+			return read(() => client.authGet("/accounts"));
+		},
+	);
 
-function ok(data: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
-}
+	server.registerTool(
+		"mb_get_balances",
+		{
+			description:
+				"Get asset balances for an account: available, on_hold (in open orders), and total. By default, only assets with balance > 0 are returned.",
+			inputSchema: {
+				accountId: z.string().describe("Account ID (use mb_list_accounts to find it)"),
+				hide_zero: z.boolean().default(true).describe("Hide assets with zero balance (default: true)"),
+			},
+			annotations: READ_ONLY,
+		},
+		async ({ accountId, hide_zero }) => {
+			const denied = requireCredentials(config);
+			if (denied) return denied;
+			return read(async () => {
+				const data = await client.authGet<Array<{ symbol: string; available: string; on_hold: string; total: string }>>(
+					apiPath(["accounts", { value: accountId, name: "accountId" }, "balances"]),
+				);
+				if (hide_zero && Array.isArray(data)) return data.filter((balance) => parseFloat(balance.total) > 0);
+				return data;
+			});
+		},
+	);
 
-export function registerAccountTools(
-  server: McpServer,
-  client: MBClient,
-  config: Config,
-  _tracker: SpendingTracker,
-): void {
-  // ─── 1. List Accounts ───
-  server.tool(
-    "mb_list_accounts",
-    "List all your Mercado Bitcoin accounts (wallets). " +
-    "Returns account IDs, names, currency and type. " +
-    "You need the accountId for most other operations.",
-    {},
-    async () => {
-      const authErr = requireAuth(config);
-      if (authErr) return err(authErr);
-      const data = await client.authGet("/accounts");
-      return ok(data);
-    },
-  );
+	server.registerTool(
+		"mb_get_tier",
+		{
+			description: "Get the fee tier level of an account. Higher tiers have lower trading fees.",
+			inputSchema: { accountId: z.string().describe("Account ID") },
+			annotations: READ_ONLY,
+		},
+		async ({ accountId }) => {
+			const denied = requireCredentials(config);
+			if (denied) return denied;
+			return read(() => client.authGet(apiPath(["accounts", { value: accountId, name: "accountId" }, "tier"])));
+		},
+	);
 
-  // ─── 2. Get Balances ───
-  server.tool(
-    "mb_get_balances",
-    "Get asset balances for an account. " +
-    "Shows available, on_hold (in open orders), and total for each asset. " +
-    "By default, only returns assets with balance > 0 (most common use case). " +
-    "Set hide_zero=false to include all 1900+ assets.",
-    {
-      accountId: z.string().describe("Account ID (use mb_list_accounts to find it)"),
-      hide_zero: z.boolean().default(true).describe("Hide assets with zero balance (default: true)"),
-    },
-    async ({ accountId, hide_zero }) => {
-      const authErr = requireAuth(config);
-      if (authErr) return err(authErr);
-      const data = await client.authGet<Array<{ symbol: string; available: string; on_hold: string; total: string }>>(
-        `/accounts/${accountId}/balances`,
-      );
+	server.registerTool(
+		"mb_get_trading_fees",
+		{
+			description: "Get maker and taker fee rates for a specific market.",
+			inputSchema: {
+				accountId: z.string().describe("Account ID"),
+				symbol: z.string().describe("Trading pair, e.g. BTC-BRL"),
+			},
+			annotations: READ_ONLY,
+		},
+		async ({ accountId, symbol }) => {
+			const denied = requireCredentials(config);
+			if (denied) return denied;
+			return read(() =>
+				client.authGet(
+					apiPath(["accounts", { value: accountId, name: "accountId" }, { value: symbol, name: "symbol" }, "fees"]),
+				),
+			);
+		},
+	);
 
-      if (hide_zero && Array.isArray(data)) {
-        const filtered = data.filter((b) => parseFloat(b.total) > 0);
-        return ok(filtered);
-      }
-
-      return ok(data);
-    },
-  );
-
-  // ─── 3. Get Tier ───
-  server.tool(
-    "mb_get_tier",
-    "Get the fee tier level of an account. Higher tiers have lower trading fees.",
-    {
-      accountId: z.string().describe("Account ID"),
-    },
-    async ({ accountId }) => {
-      const authErr = requireAuth(config);
-      if (authErr) return err(authErr);
-      const data = await client.authGet(`/accounts/${accountId}/tier`);
-      return ok(data);
-    },
-  );
-
-  // ─── 4. Get Trading Fees ───
-  server.tool(
-    "mb_get_trading_fees",
-    "Get maker and taker fee rates for a specific market. " +
-    "Useful before placing orders to estimate costs.",
-    {
-      accountId: z.string().describe("Account ID"),
-      symbol: z.string().describe("Trading pair, e.g. BTC-BRL"),
-    },
-    async ({ accountId, symbol }) => {
-      const authErr = requireAuth(config);
-      if (authErr) return err(authErr);
-      const data = await client.authGet(`/accounts/${accountId}/${symbol}/fees`);
-      return ok(data);
-    },
-  );
-
-  // ─── 5. Get Positions ───
-  server.tool(
-    "mb_get_positions",
-    "List open positions with average entry price, quantity and side. " +
-    "Useful for portfolio analysis and P&L tracking.",
-    {
-      accountId: z.string().describe("Account ID"),
-      symbols: z.string().optional().describe("Comma-separated filter, e.g. BTC-BRL,ETH-BRL"),
-    },
-    async ({ accountId, symbols }) => {
-      const authErr = requireAuth(config);
-      if (authErr) return err(authErr);
-      const data = await client.authGet(`/accounts/${accountId}/positions`, { symbols });
-      return ok(data);
-    },
-  );
-
-  // ─── 6. Internal Transfer ───
-  server.tool(
-    "mb_internal_transfer",
-    "Transfer an asset between your own Mercado Bitcoin accounts (sub-wallets). " +
-    "Requires confirmation. Call first with confirm=false to preview, then confirm=true to execute.",
-    {
-      accountId: z.string().describe("Source account ID"),
-      symbol: z.string().describe("Asset to transfer, e.g. BRL, BTC"),
-      amount: z.string().describe("Amount to transfer"),
-      recipientAccountId: z.string().describe("Destination account ID"),
-      confirm: z.boolean().default(false).describe("Set true to execute after preview"),
-    },
-    async ({ accountId, symbol, amount, recipientAccountId, confirm }) => {
-      const authErr = requireAuth(config);
-      if (authErr) return err(authErr);
-      const modeErr = requireMode(config, "trading");
-      if (modeErr) return err(modeErr);
-
-      if (!confirm && !config.autoConfirm) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: confirmationPreview("Internal Transfer", {
-              "From Account": accountId,
-              "To Account": recipientAccountId,
-              "Asset": symbol,
-              "Amount": amount,
-            }, config.dryRun),
-          }],
-        };
-      }
-
-      if (config.dryRun) {
-        return ok({ dryRun: true, message: "Transfer would be executed", accountId, symbol, amount, recipientAccountId });
-      }
-
-      const data = await client.authPost(`/accounts/${accountId}/${symbol}/transfers/internal`, {
-        amount,
-        recipient_account_id: recipientAccountId,
-        transaction_id: `mcp-${Date.now()}`,
-      });
-      return ok(data);
-    },
-  );
+	server.registerTool(
+		"mb_get_positions",
+		{
+			description: "List open positions with average entry price, quantity and side.",
+			inputSchema: {
+				accountId: z.string().describe("Account ID"),
+				symbols: z.string().optional().describe("Comma-separated filter, e.g. BTC-BRL,ETH-BRL"),
+			},
+			annotations: READ_ONLY,
+		},
+		async ({ accountId, symbols }) => {
+			const denied = requireCredentials(config);
+			if (denied) return denied;
+			return read(() =>
+				client.authGet(apiPath(["accounts", { value: accountId, name: "accountId" }, "positions"]), { symbols }),
+			);
+		},
+	);
 }

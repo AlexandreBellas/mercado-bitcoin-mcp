@@ -1,50 +1,33 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project
-
-MCP Server for Mercado Bitcoin (Brazilian crypto exchange). Exposes the full MB API v4 as 31 MCP tools for use by LLMs and AI agents.
+Read-only Mercado Bitcoin MCP server on Cloudflare Workers.
 
 ## Commands
 
-- `npm run build` — compile TypeScript to `build/`
-- `npm run dev` — watch mode (rebuild on changes)
-- `npm start` — run the compiled server
-- `npx @modelcontextprotocol/inspector node build/index.js` — test with MCP Inspector
+- `npm test` — vitest
+- `npm run typecheck` — `tsc --noEmit`
+- `npm run dev` — `wrangler dev`
+- `npm run deploy` — `wrangler deploy` (Workers Builds runs this on main; do not deploy from a cloud agent)
+- `npx wrangler deploy --dry-run` — bundle check only
 
 ## Architecture
 
 ```text
 src/
-├── index.ts          Entry point: creates McpServer, registers tools, starts stdio transport
-├── config.ts         Environment variable loading → Config object
-├── auth.ts           OAuth2 token lifecycle (auto-refresh, concurrency-safe)
-├── client.ts         HTTP client wrapping MB API v4 (public + authenticated requests)
-├── guards.ts         Security: operation mode gates, spending tracker, confirmation previews
-└── tools/
-    ├── public.ts     7 tools — orderbook, trades, symbols, tickers, candles, fees, networks
-    ├── account.ts    6 tools — accounts, balances, tier, positions, fees, internal transfer
-    ├── trading.ts    6 tools — place/cancel/list orders (with confirmation flow)
-    └── wallet.ts     11 tools — deposits, withdrawals, addresses, bank accounts, sub-accounts
+├── index.ts            Worker fetch handler. Exports AuthRateLimit
+├── http.ts             GET /health and POST /mcp
+├── auth-gate.ts        Bearer MCP_AUTH_TOKEN check and per-IP lockout
+├── auth-rate-limit.ts  SQLite Durable Object (new_sqlite_classes)
+├── mcp.ts              Stateless Streamable HTTP transport
+├── server.ts           Registers every read tool
+├── auth.ts             OAuth2 client_credentials token cache (isolate memory)
+├── client.ts           GET-only Mercado Bitcoin API client
+├── paths.ts            Path-parameter validation and encoding
+└── tools/              public, account, trading (list/get only), wallet (reads only)
 ```
 
-### Security model (3 layers)
+The server is strictly read-only. Do not add POST or DELETE client methods, order placement, cancellation, withdrawals, transfers, or account creation. The only outbound POST is the hardcoded OAuth token URL in `auth.ts`.
 
-1. **Operation mode** (`MB_OPERATION_MODE`): controls which tool groups are registered at startup. `readonly` < `trading` < `full`.
-2. **Confirmation flow**: dangerous tools require `confirm=true` parameter. Default call returns a preview; user must approve before execution.
-3. **Spending guards**: `MB_MAX_ORDER_BRL` (per-order), `MB_DAILY_LIMIT_BRL` (daily), `MB_DRY_RUN` (simulate). Tracked in `SpendingTracker`.
+`MB_API_KEY`, `MB_API_SECRET`, and `MCP_AUTH_TOKEN` are Worker secrets. Never log, return, or commit them, or the access token.
 
-### Key patterns
-
-- All tools return `{ content: [{ type: "text", text: JSON.stringify(data) }] }`.
-- Auth token is cached and auto-refreshed 60s before expiry. Concurrent refresh requests are coalesced.
-- Guard checks (`requireAuth`, `requireMode`) run at tool invocation, returning error content if denied.
-- `console.error()` for all logging (never stdout — it's the MCP transport).
-
-## MB API reference
-
-- Base URL: `https://api.mercadobitcoin.net/api/v4`
-- Auth: OAuth2 client_credentials → Bearer token (1h TTL)
-- Swagger: `https://api.mercadobitcoin.net/api/v4/docs/swagger.yaml`
-- Rate limit: 500 req/min global, per-endpoint limits vary (1-10 req/sec)
+On Workers, call `fetch` as a free function (`httpFetch` in `src/http-fetch.ts`). Do not invoke it as a method of another object.

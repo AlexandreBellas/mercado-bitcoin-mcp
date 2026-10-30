@@ -4,16 +4,23 @@
 # Claude Code local settings
 .claude/
 
-# Environment variables
+# Environment variables and local Worker secrets
 .env
 .env.*
 !.env.example
+.dev.vars
+!.dev.vars.example
 
 # Dependencies
 node_modules/
 
+# Wrangler local state and generated runtime types
+.wrangler/
+worker-configuration.d.ts
+
 # Build output
 build/
+dist/
 
 # OS files
 .DS_Store

@@ -1,0 +1,19 @@
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import type { CredentialEnv } from "./config.js";
+import { createMbServer } from "./server.js";
+
+/** Stateless Streamable HTTP. One server and transport per request; no session id. */
+export async function handleMcpRequest(request: Request, env: CredentialEnv): Promise<Response> {
+	const server = createMbServer(env);
+	const transport = new WebStandardStreamableHTTPServerTransport({
+		sessionIdGenerator: undefined,
+		enableJsonResponse: true,
+	});
+	await server.connect(transport);
+	try {
+		return await transport.handleRequest(request);
+	} finally {
+		await transport.close().catch(() => undefined);
+		await server.close().catch(() => undefined);
+	}
+}

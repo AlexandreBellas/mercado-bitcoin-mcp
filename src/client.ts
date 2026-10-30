@@ -1,94 +1,101 @@
-import { Config } from "./config.js";
-import { AuthManager } from "./auth.js";
+import type { AuthManager } from "./auth.js";
+import type { Config } from "./config.js";
+import { httpFetch } from "./http-fetch.js";
+import { assertSafePath } from "./paths.js";
 
+const QUERY_KEY = /^[A-Za-z0-9_]{1,64}$/;
+
+/**
+ * Read-only Mercado Bitcoin API v4 client.
+ * Every call is a GET. There is no POST or DELETE method on this class.
+ */
 export class MBClient {
-  readonly auth: AuthManager;
+	constructor(
+		private config: Config,
+		private auth: AuthManager,
+	) {}
 
-  constructor(private config: Config) {
-    this.auth = new AuthManager(config);
-  }
+	get hasCredentials(): boolean {
+		return this.config.apiKey.length > 0 && this.config.apiSecret.length > 0;
+	}
 
-  get baseUrl(): string {
-    return this.config.baseUrl;
-  }
+	async publicGet<T = unknown>(path: string, params?: Record<string, string | undefined>): Promise<T> {
+		const url = this.buildUrl(path, params);
+		const res = await getOnly(url);
+		return this.handleResponse<T>(res);
+	}
 
-  get hasCredentials(): boolean {
-    return this.auth.hasCredentials();
-  }
+	async authGet<T = unknown>(path: string, params?: Record<string, string | undefined>): Promise<T> {
+		const url = this.buildUrl(path, params);
+		const token = await this.auth.getToken();
+		const res = await getOnly(url, { headers: { Authorization: `Bearer ${token}` } });
+		return this.handleResponse<T>(res);
+	}
 
-  // --- Public (unauthenticated) requests ---
+	private buildUrl(path: string, params?: Record<string, string | undefined>): string {
+		assertSafePath(path);
+		const base = new URL(this.config.baseUrl);
+		const url = new URL(`${this.config.baseUrl}${path}`);
+		assertUnderBase(url, base);
+		if (params) {
+			for (const [key, value] of Object.entries(params)) {
+				if (value === undefined || value === "") continue;
+				if (!QUERY_KEY.test(key)) {
+					throw new Error("Refusing an unsafe query parameter.");
+				}
+				url.searchParams.set(key, value);
+			}
+		}
+		assertUnderBase(url, base);
+		return url.toString();
+	}
 
-  async publicGet<T = unknown>(path: string, params?: Record<string, string | undefined>): Promise<T> {
-    const url = this.buildUrl(path, params);
-    const res = await fetch(url);
-    return this.handleResponse<T>(res);
-  }
+	private async handleResponse<T>(res: Response): Promise<T> {
+		if (res.status >= 300 && res.status < 400) {
+			throw new Error(`Mercado Bitcoin API error (HTTP ${res.status}).`);
+		}
+		if (!res.ok) {
+			const body = await res.text();
+			throw new Error(`Mercado Bitcoin API error (HTTP ${res.status}): ${this.redact(body).slice(0, 500)}`);
+		}
+		if (res.status === 204) return {} as T;
+		const text = await res.text();
+		if (!text) return {} as T;
+		try {
+			return JSON.parse(text) as T;
+		} catch {
+			return { raw: this.redact(text).slice(0, 500) } as T;
+		}
+	}
 
-  // --- Authenticated requests ---
+	private redact(text: string): string {
+		const secrets = [this.config.apiKey, this.config.apiSecret, this.auth.currentAccessToken() ?? ""];
+		let out = text;
+		for (const secret of secrets) {
+			if (secret.length === 0) continue;
+			out = out.split(secret).join("[redacted]");
+		}
+		return out.replace(/Bearer\s+\S+/gi, "Bearer [redacted]");
+	}
+}
 
-  async authGet<T = unknown>(path: string, params?: Record<string, string | undefined>): Promise<T> {
-    const url = this.buildUrl(path, params);
-    const token = await this.auth.getToken();
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return this.handleResponse<T>(res);
-  }
+function assertUnderBase(url: URL, base: URL): void {
+	if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) {
+		throw new Error("Refusing to request outside the Mercado Bitcoin API.");
+	}
+}
 
-  async authPost<T = unknown>(path: string, body?: unknown): Promise<T> {
-    const token = await this.auth.getToken();
-    const res = await fetch(`${this.config.baseUrl}${path}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    return this.handleResponse<T>(res);
-  }
-
-  async authDelete<T = unknown>(path: string, params?: Record<string, string | undefined>): Promise<T> {
-    const url = this.buildUrl(path, params);
-    const token = await this.auth.getToken();
-    const res = await fetch(url, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return this.handleResponse<T>(res);
-  }
-
-  // --- Helpers ---
-
-  private buildUrl(path: string, params?: Record<string, string | undefined>): string {
-    const url = new URL(`${this.config.baseUrl}${path}`);
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined && v !== "") url.searchParams.set(k, v);
-      }
-    }
-    return url.toString();
-  }
-
-  private async handleResponse<T>(res: Response): Promise<T> {
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Mercado Bitcoin API error (HTTP ${res.status}): ${body}`);
-    }
-
-    if (res.status === 204) {
-      return {} as T;
-    }
-
-    const text = await res.text();
-    if (!text) {
-      return {} as T;
-    }
-
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      return { raw: text } as T;
-    }
-  }
+/** GET only. A non-GET method never leaves this server through the API client. */
+function getOnly(url: string, init?: RequestInit): Promise<Response> {
+	const method = init?.method ?? "GET";
+	if (method !== "GET") {
+		throw new Error("This server is read-only and refuses non-GET Mercado Bitcoin API calls.");
+	}
+	const headers = new Headers(init?.headers);
+	return httpFetch(url, {
+		method: "GET",
+		headers,
+		redirect: "manual",
+		cache: "no-store",
+	});
 }
