@@ -171,14 +171,19 @@ describe("token request", () => {
 			),
 		);
 		const auth = new AuthManager(loadConfig({ MB_API_KEY: API_KEY, MB_API_SECRET: API_SECRET }, MB_API_BASE));
-		await expect(auth.getToken()).rejects.toThrow(/authentication failed/);
+		await expect(auth.getToken()).rejects.toThrow(
+			"Mercado Bitcoin authentication failed at token exchange (HTTP 422, code HUH422, unprocessable, error invalid_request). Body: grant_type missing",
+		);
 		expect(errors.mock.calls).toHaveLength(1);
 		expect(JSON.parse(String(errors.mock.calls[0]?.[0]))).toEqual({
 			message: "Mercado Bitcoin authentication failed",
+			step: "token",
 			status: 422,
+			contentType: "application/json",
 			code: "HUH422",
 			mbMessage: "unprocessable",
 			data: { error: "invalid_request", message: "grant_type missing" },
+			snippet: "grant_type missing",
 		});
 		const logged = errors.mock.calls.map((args) => args.join(" ")).join("\n");
 		expect(logged).not.toContain(API_SECRET);
@@ -196,15 +201,18 @@ describe("token request", () => {
 			),
 		).toEqual({
 			message: "Mercado Bitcoin authentication failed",
+			step: "token",
 			status: 401,
 			code: "HUH401",
 			mbMessage: "unauthorized",
 			data: { error: "invalid_client" },
+			snippet: "unauthorized",
 		});
 
 		const leaked = `client_id=${API_KEY}&client_secret=${API_SECRET}`;
 		expect(tokenFailureLog(422, leaked, [API_KEY, API_SECRET])).toEqual({
 			message: "Mercado Bitcoin authentication failed",
+			step: "token",
 			status: 422,
 		});
 		expect(
@@ -215,8 +223,10 @@ describe("token request", () => {
 			),
 		).toEqual({
 			message: "Mercado Bitcoin authentication failed",
+			step: "token",
 			status: 422,
 			data: { message: "ok" },
+			snippet: "ok",
 		});
 	});
 });
