@@ -4,6 +4,7 @@ import { MB_API_BASE, MB_API_ORIGIN } from "./constants.js";
 import { httpFetch } from "./http-fetch.js";
 import { assertSafePath } from "./paths.js";
 import type { OutboundBudget } from "./request-gate.js";
+import { captureBody, describeUpstreamFailure, redactSecrets } from "./upstream-error.js";
 
 const QUERY_KEY = /^[A-Za-z0-9_]{1,64}$/;
 
@@ -58,12 +59,17 @@ export class MBClient {
 	}
 
 	private async handleResponse<T>(res: Response): Promise<T> {
-		if (res.status >= 300 && res.status < 400) {
-			throw new Error(`Mercado Bitcoin API error (HTTP ${res.status}).`);
-		}
 		if (!res.ok) {
-			const body = await res.text();
-			throw new Error(`Mercado Bitcoin API error (HTTP ${res.status}): ${this.redact(body).slice(0, 500)}`);
+			const body = await captureBody(res);
+			const failure = describeUpstreamFailure({
+				step: "api",
+				status: res.status,
+				body,
+				headers: res.headers,
+				secrets: this.secretValues(),
+			});
+			console.error(JSON.stringify(failure.log));
+			throw new Error(failure.message);
 		}
 		if (res.status === 204) return {} as T;
 		const text = await res.text();
@@ -75,14 +81,12 @@ export class MBClient {
 		}
 	}
 
+	private secretValues(): string[] {
+		return [this.config.apiKey, this.config.apiSecret, this.auth.currentAccessToken() ?? ""];
+	}
+
 	private redact(text: string): string {
-		const secrets = [this.config.apiKey, this.config.apiSecret, this.auth.currentAccessToken() ?? ""];
-		let out = text;
-		for (const secret of secrets) {
-			if (secret.length === 0) continue;
-			out = out.split(secret).join("[redacted]");
-		}
-		return out.replace(/Bearer\s+\S+/gi, "Bearer [redacted]");
+		return redactSecrets(text, this.secretValues());
 	}
 }
 

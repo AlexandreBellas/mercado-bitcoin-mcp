@@ -2,6 +2,7 @@ import { MB_TOKEN_URL, SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import type { Config } from "./config.js";
 import { httpFetch } from "./http-fetch.js";
 import type { OutboundBudget } from "./request-gate.js";
+import { captureBody, describeUpstreamFailure } from "./upstream-error.js";
 
 interface TokenState {
 	accessToken: string;
@@ -9,8 +10,6 @@ interface TokenState {
 }
 
 const USER_AGENT = `${SERVER_NAME}/${SERVER_VERSION}`;
-const ERROR_BODY_LIMIT = 8192;
-const SAFE_CODE = /^[A-Za-z0-9_.:-]{1,32}$/;
 
 /**
  * OAuth2 client_credentials for Mercado Bitcoin API v4.
@@ -83,14 +82,17 @@ export class AuthManager {
 		await this.budget?.observe("token", res);
 
 		if (!res.ok) {
-			const text = await readErrorBody(res);
+			const text = await captureBody(res);
 			const secrets = [this.config.apiKey, this.config.apiSecret];
-			const log = tokenFailureLog(res.status, text, secrets);
-			if (res.status >= 300 && res.status < 400) {
-				log.message = "Mercado Bitcoin token endpoint redirected";
-			}
-			console.error(JSON.stringify(log));
-			throw new Error("Mercado Bitcoin authentication failed.");
+			const failure = describeUpstreamFailure({
+				step: "token",
+				status: res.status,
+				body: text,
+				headers: res.headers,
+				secrets,
+			});
+			console.error(JSON.stringify(failure.log));
+			throw new Error(failure.message);
 		}
 
 		const data = (await res.json()) as Oauth2AuthorizeResponse;
@@ -145,71 +147,12 @@ export function expiresAtFromExpiration(expiration: unknown, now: number): numbe
 }
 
 /**
- * Fields safe to print from a token error. The raw body is never included:
- * Mercado Bitcoin may echo the client id, client secret, or a token.
+ * Fields safe to print from a token error. Delegates to the shared upstream
+ * diagnostic. The raw body is never included: Mercado Bitcoin may echo the
+ * client id, client secret, or a token.
  */
 export function tokenFailureLog(status: number, body: string, secrets: string[]): Record<string, unknown> {
-	const log: Record<string, unknown> = {
-		message: "Mercado Bitcoin authentication failed",
-		status,
-	};
-	if (body.length === 0 || body.length > ERROR_BODY_LIMIT) return log;
-
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(body);
-	} catch {
-		return log;
-	}
-	if (!parsed || typeof parsed !== "object") return log;
-
-	const obj = parsed as Record<string, unknown>;
-	const code = publicCode(obj.code, secrets);
-	if (code) log.code = code;
-	const mbMessage = publicText(obj.message, secrets);
-	if (mbMessage) log.mbMessage = mbMessage;
-
-	if (obj.data && typeof obj.data === "object") {
-		const data = obj.data as Record<string, unknown>;
-		const error = publicCode(data.error, secrets);
-		const dataMessage = publicText(data.message, secrets);
-		if (error || dataMessage) {
-			log.data = {
-				...(error ? { error } : {}),
-				...(dataMessage ? { message: dataMessage } : {}),
-			};
-		}
-	}
-	return log;
-}
-
-function publicCode(value: unknown, secrets: string[]): string | undefined {
-	if (typeof value !== "string" || !SAFE_CODE.test(value)) return undefined;
-	if (containsSecret(value, secrets)) return undefined;
-	return value;
-}
-
-function publicText(value: unknown, secrets: string[]): string | undefined {
-	if (typeof value !== "string") return undefined;
-	const text = value.trim();
-	if (text.length === 0 || text.length > 200) return undefined;
-	if (text.includes("=") || text.includes("\n") || text.includes("\r")) return undefined;
-	if (/[A-Za-z0-9+/=_-]{32,}/.test(text)) return undefined;
-	if (containsSecret(text, secrets)) return undefined;
-	return text;
-}
-
-function containsSecret(value: string, secrets: string[]): boolean {
-	return secrets.some((secret) => secret.length > 0 && value.includes(secret));
-}
-
-async function readErrorBody(res: Response): Promise<string> {
-	try {
-		const text = await res.text();
-		return text.length > ERROR_BODY_LIMIT ? "" : text;
-	} catch {
-		return "";
-	}
+	return describeUpstreamFailure({ step: "token", status, body, secrets }).log;
 }
 
 interface Oauth2AuthorizeResponse {
